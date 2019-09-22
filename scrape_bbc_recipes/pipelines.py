@@ -7,7 +7,8 @@
 
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import DataError, IntegrityError
-from . models import Recipes, db_connect, create_table
+from . models import Recipe, RawIngredient, db_connect, create_table
+from . items import RecipesItem, RawIngredientsItem
 from datetime import datetime
 from logging import getLogger
 
@@ -25,23 +26,48 @@ class ScrapeBbcRecipesPipeline(object):
 
     def process_item(self, item, spider):
         """
-        Dump ad into the db
+        Dump recipes into the db
         """
-        # parse the date
-        item['last_seen'] = datetime.strptime(item['last_seen'], "%d-%m-%y %H:%M:%S")
+        if isinstance(item, RecipesItem):
+            return self.process_recipe(item, spider)
+        if isinstance(item, RawIngredientsItem):
+            return self.process_raw_ingredient(item, spider)
 
-        if 'first_seen' in item.keys():
-            item.pop('first_seen')
+    def process_recipe(self, item, spider):
+        # parse the date
+        item['inserted_at'] = datetime.strptime(item['inserted_at'], "%d-%m-%y %H:%M:%S")
+
+        # get the recipe id
+        item['recipe_id_nk'] = item['recipe_url'].split('_')[-1]
 
         session = self.Session()
-        ad = Recipes(**item)
+        recipe = Recipe(**item)
 
         try:
-            session.add(ad)
+            session.add(recipe)
             session.commit()
         except DataError as error:
             log.exception(error)
         except IntegrityError:
             session.rollback()
-            session.merge(ad)
+            session.merge(recipe)
+            session.commit()
+
+    def process_raw_ingredient(self, item, spider):
+        # parse the date
+        item['inserted_at'] = datetime.strptime(item['inserted_at'], "%d-%m-%y %H:%M:%S")
+
+        session = self.Session()
+        raw_ingredient = RawIngredient(**item)
+
+        # TODO: dump each raw ingredient as a single entry in raw_ingredient table
+
+        try:
+            session.add(raw_ingredient)
+            session.commit()
+        except DataError as error:
+            log.exception(error)
+        except IntegrityError:
+            session.rollback()
+            session.merge(raw_ingredient)
             session.commit()
